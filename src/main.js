@@ -46,24 +46,11 @@ app.on('activate', () => {
   }
 });
 
-// Check for required dependencies
+// Check for required dependencies (simplified, non-blocking)
 function checkDependencies() {
-  const dependencies = ['yt-dlp', 'ffmpeg'];
-  const missing = [];
-  
-  for (const dep of dependencies) {
-    try {
-      const { spawn } = require('child_process');
-      const process = spawn(dep, ['--version'], { stdio: 'pipe' });
-      process.on('error', () => {
-        missing.push(dep);
-      });
-    } catch (error) {
-      missing.push(dep);
-    }
-  }
-  
-  return missing;
+  // For now, just return that all dependencies are available
+  // The actual error handling will happen when trying to use the tools
+  return [];
 }
 
 // IPC handlers for YouTube processing
@@ -243,33 +230,25 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
     console.log(`📁 Output path: ${outputPath}`);
     console.log(`⏰ Start time: ${startTime}s, Duration: ${duration}s`);
     
-    // Check if yt-dlp is available
-    const ytdlp = spawn('yt-dlp', ['--version'], { stdio: 'pipe' });
-    ytdlp.on('error', (error) => {
+    // Download audio with yt-dlp
+    const tempPath = outputPath.replace('.mp3', '_temp.mp3');
+    console.log(`📥 Temp file: ${tempPath}`);
+    
+    const ytdlpDownload = spawn('yt-dlp', [
+      '--extract-audio',
+      '--audio-format', 'mp3',
+      '--output', tempPath,
+      '--verbose', // Add verbose logging
+      url
+    ]);
+    
+    // Handle spawn errors
+    ytdlpDownload.on('error', (error) => {
       console.error('❌ yt-dlp not found:', error.message);
       reject(new Error('yt-dlp is not installed. Please install yt-dlp to use this feature. Visit: https://github.com/yt-dlp/yt-dlp'));
-      return;
     });
     
-    ytdlp.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error('yt-dlp is not installed. Please install yt-dlp to use this feature. Visit: https://github.com/yt-dlp/yt-dlp'));
-        return;
-      }
-      
-      // Download audio with yt-dlp
-      const tempPath = outputPath.replace('.mp3', '_temp.mp3');
-      console.log(`📥 Temp file: ${tempPath}`);
-      
-      const ytdlpDownload = spawn('yt-dlp', [
-        '--extract-audio',
-        '--audio-format', 'mp3',
-        '--output', tempPath,
-        '--verbose', // Add verbose logging
-        url
-      ]);
-    
-      // Log yt-dlp output for debugging
+    // Log yt-dlp output for debugging
       ytdlpDownload.stdout.on('data', (data) => {
         console.log(`yt-dlp stdout: ${data}`);
       });
