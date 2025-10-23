@@ -77,11 +77,15 @@ function checkDependencies() {
     }
   }
   
-  // Check for ffmpeg (system only)
-  try {
-    require('child_process').execSync('ffmpeg -version', { stdio: 'ignore' });
-  } catch (error) {
-    missing.push('ffmpeg');
+  // Check for ffmpeg (bundled or system)
+  const ffmpegPath = getBinaryPath('ffmpeg');
+  if (ffmpegPath === 'ffmpeg') {
+    // Check if system ffmpeg is available
+    try {
+      require('child_process').execSync('ffmpeg -version', { stdio: 'ignore' });
+    } catch (error) {
+      missing.push('ffmpeg');
+    }
   }
   
   return missing;

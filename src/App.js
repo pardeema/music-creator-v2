@@ -210,15 +210,16 @@ function App() {
                 <li key={dep}>
                   <strong>{dep}</strong> - 
                   {dep === 'yt-dlp' && ' This should be included with the app. Please reinstall Music Creator.'}
-                  {dep === 'ffmpeg' && ' Install via Homebrew: brew install ffmpeg'}
+                  {dep === 'ffmpeg' && ' This should be included with the app. Please reinstall Music Creator.'}
                 </li>
               ))}
             </ul>
-            <p>Please install these tools to use the audio processing features.</p>
+            <p>Both yt-dlp and ffmpeg should be included with this app. If you're seeing this error, please reinstall Music Creator.</p>
             <div className="installation-instructions">
-              <h4>Installation Instructions:</h4>
-              <p><strong>ffmpeg:</strong> Open Terminal and run: <code>brew install ffmpeg</code></p>
-              <p><strong>yt-dlp:</strong> Should be included with the app. If missing, please reinstall Music Creator.</p>
+              <h4>Alternative Installation:</h4>
+              <p>If the bundled tools don't work, you can install them manually:</p>
+              <p><strong>ffmpeg:</strong> <code>brew install ffmpeg</code></p>
+              <p><strong>yt-dlp:</strong> <code>pip install yt-dlp</code></p>
             </div>
           </div>
         </div>
