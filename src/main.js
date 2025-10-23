@@ -291,7 +291,6 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
         }
       });
     });
-  });
 }
 
 async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration) {
