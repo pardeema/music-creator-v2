@@ -406,6 +406,7 @@ async function getVideoInfo(url) {
     logInfo(`Getting video info for: ${url}`);
     const ytdlp = spawn(getBinaryPath('yt-dlp'), [
       '--dump-json',
+      '--ffmpeg-location', getBinaryPath('ffmpeg'),
       '--no-warnings',
       '--no-check-certificate',
       '--socket-timeout', '30',
@@ -479,6 +480,7 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
       '--extract-audio',
       '--audio-format', 'mp3',
       '--output', tempPath,
+      '--ffmpeg-location', getBinaryPath('ffmpeg'),
       '--no-warnings',
       '--no-check-certificate',
       '--socket-timeout', '30',
