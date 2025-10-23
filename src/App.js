@@ -180,8 +180,13 @@ function App() {
   return (
     <div className="App">
       <header className="App-header">
-        <h1>🎵 Music Creator</h1>
-        <p>Extract audio clips from YouTube videos for trivia content</p>
+        <div className="header-content">
+          <img src="/logo.png" alt="Music Creator" className="app-logo" />
+          <div className="header-text">
+            <h1>Music Creator</h1>
+            <p>Extract audio clips from YouTube videos for trivia content</p>
+          </div>
+        </div>
       </header>
 
       <main className="App-main">
