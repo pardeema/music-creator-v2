@@ -181,7 +181,7 @@ function App() {
     <div className="App">
       <header className="App-header">
         <div className="header-content">
-          <img src="/logo.png" alt="Music Creator" className="app-logo" />
+          <img src="./logo.png" alt="Music Creator" className="app-logo" />
           <div className="header-text">
             <h1>Music Creator</h1>
             <p>Extract audio clips from YouTube videos for trivia content</p>
