@@ -5,6 +5,22 @@ const fs = require('fs');
 const archiver = require('archiver');
 const Store = require('electron-store');
 
+// Get the path to bundled binaries
+const getBinaryPath = (binaryName) => {
+  const bundledPath = path.join(process.resourcesPath, 'binaries', binaryName);
+  const systemPath = binaryName; // Use system PATH
+  
+  // Check if bundled binary exists
+  if (fs.existsSync(bundledPath)) {
+    console.log(`📦 Using bundled ${binaryName}: ${bundledPath}`);
+    return bundledPath;
+  }
+  
+  // Fall back to system binary
+  console.log(`🔍 Using system ${binaryName}`);
+  return systemPath;
+};
+
 // Initialize store for user preferences
 const store = new Store();
 
@@ -46,11 +62,29 @@ app.on('activate', () => {
   }
 });
 
-// Check for required dependencies (simplified, non-blocking)
+// Check for required dependencies
 function checkDependencies() {
-  // For now, just return that all dependencies are available
-  // The actual error handling will happen when trying to use the tools
-  return [];
+  const missing = [];
+  
+  // Check for yt-dlp (bundled or system)
+  const ytdlpPath = getBinaryPath('yt-dlp');
+  if (ytdlpPath === 'yt-dlp') {
+    // Check if system yt-dlp is available
+    try {
+      require('child_process').execSync('yt-dlp --version', { stdio: 'ignore' });
+    } catch (error) {
+      missing.push('yt-dlp');
+    }
+  }
+  
+  // Check for ffmpeg (system only)
+  try {
+    require('child_process').execSync('ffmpeg -version', { stdio: 'ignore' });
+  } catch (error) {
+    missing.push('ffmpeg');
+  }
+  
+  return missing;
 }
 
 // IPC handlers for YouTube processing
@@ -315,7 +349,7 @@ function cleanYouTubeUrl(url) {
 async function getVideoInfo(url) {
   return new Promise((resolve, reject) => {
     console.log(`🔍 Getting video info for: ${url}`);
-    const ytdlp = spawn('yt-dlp', [
+    const ytdlp = spawn(getBinaryPath('yt-dlp'), [
       '--dump-json',
       '--no-warnings',
       '--no-check-certificate',
@@ -381,7 +415,7 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
     const tempPath = outputPath.replace('.mp3', '_temp.mp3');
     console.log(`📥 Temp file: ${tempPath}`);
     
-    const ytdlpDownload = spawn('yt-dlp', [
+    const ytdlpDownload = spawn(getBinaryPath('yt-dlp'), [
       '--extract-audio',
       '--audio-format', 'mp3',
       '--output', tempPath,
@@ -404,7 +438,7 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
     ytdlpDownload.on('error', (error) => {
       clearTimeout(ytdlpTimeout);
       console.error('❌ yt-dlp not found:', error.message);
-      reject(new Error('yt-dlp is not installed. Please install yt-dlp to use this feature. Visit: https://github.com/yt-dlp/yt-dlp'));
+      reject(new Error('yt-dlp is not available. Please ensure the application is properly installed and try again. If the issue persists, please reinstall Music Creator.'));
     });
     
     // Log yt-dlp output for debugging
@@ -480,7 +514,7 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
       
       console.log(`🔧 Extract command: ffmpeg ${extractArgs.join(' ')}`);
       
-      const extract = spawn('ffmpeg', extractArgs);
+      const extract = spawn(getBinaryPath('ffmpeg'), extractArgs);
       
       // Add timeout for extract process
       const extractTimeout = setTimeout(() => {
@@ -511,7 +545,7 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
           
           console.log(`🔧 Fade command: ffmpeg ${fadeArgs.join(' ')}`);
           
-          const fade = spawn('ffmpeg', fadeArgs);
+          const fade = spawn(getBinaryPath('ffmpeg'), fadeArgs);
           
           // Add timeout for fade process
           const fadeTimeout = setTimeout(() => {

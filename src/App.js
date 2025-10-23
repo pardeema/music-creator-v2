@@ -209,12 +209,17 @@ function App() {
               {dependencies.missing.map(dep => (
                 <li key={dep}>
                   <strong>{dep}</strong> - 
-                  {dep === 'yt-dlp' && ' Download from: https://github.com/yt-dlp/yt-dlp'}
-                  {dep === 'ffmpeg' && ' Download from: https://ffmpeg.org/download.html'}
+                  {dep === 'yt-dlp' && ' This should be included with the app. Please reinstall Music Creator.'}
+                  {dep === 'ffmpeg' && ' Install via Homebrew: brew install ffmpeg'}
                 </li>
               ))}
             </ul>
             <p>Please install these tools to use the audio processing features.</p>
+            <div className="installation-instructions">
+              <h4>Installation Instructions:</h4>
+              <p><strong>ffmpeg:</strong> Open Terminal and run: <code>brew install ffmpeg</code></p>
+              <p><strong>yt-dlp:</strong> Should be included with the app. If missing, please reinstall Music Creator.</p>
+            </div>
           </div>
         </div>
       )}
