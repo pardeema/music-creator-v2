@@ -84,29 +84,47 @@ ipcMain.handle('process-youtube-links', async (event, { links, downloadPath, def
       });
 
       console.log(`🎵 Processing file ${i + 1}/${links.length}: ${link.url}`);
-      const result = await processYouTubeLink(link, downloadPath, i + 1, defaultDuration);
-      results.push(result);
+      logProcessStatus('Starting', i + 1, links.length);
       
-      // Force garbage collection and cleanup between files
-      if (global.gc) {
-        global.gc();
+      // Add timeout for entire file processing
+      const fileTimeout = setTimeout(() => {
+        console.error(`⏰ File ${i + 1} processing timeout (5 minutes)`);
+        throw new Error(`File processing timeout (5 minutes)`);
+      }, 5 * 60 * 1000); // 5 minute timeout per file
+      
+      try {
+        const result = await processYouTubeLink(link, downloadPath, i + 1, defaultDuration);
+        clearTimeout(fileTimeout);
+        results.push(result);
+        
+        logProcessStatus('Completed', i + 1, links.length);
+        console.log(`✅ Completed file ${i + 1}/${links.length}`);
+      } catch (fileError) {
+        clearTimeout(fileTimeout);
+        logProcessStatus('Failed', i + 1, links.length);
+        throw fileError;
       }
       
-      // Small delay to prevent resource exhaustion
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // Force garbage collection and cleanup between files
+      cleanupProcesses();
       
-      console.log(`✅ Completed file ${i + 1}/${links.length}`);
+      // Longer delay to prevent resource exhaustion
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 second delay
+      
     } catch (error) {
       console.error(`❌ Error processing file ${i + 1}:`, error.message);
       errors.push({
         link: link.url,
         error: error.message
       });
+      
+      // Continue with next file even if one fails
+      console.log(`⏭️ Continuing with next file...`);
     }
   }
 
-  // Always create zip file and clean up individual files
-  if (results.length > 0) {
+  // Only create zip file for multiple files
+  if (results.length > 1) {
     try {
       // Generate timestamped zip filename
       const now = new Date();
@@ -119,13 +137,31 @@ ipcMain.handle('process-youtube-links', async (event, { links, downloadPath, def
       const filePaths = audioFiles.map(r => r.filePath);
       
       console.log(`📦 Creating zip file: ${zipFilename}`);
-      await createZipFile(filePaths, zipPath);
+      console.log(`📁 Files to zip: ${filePaths.length} files`);
+      
+      // Add timeout for zip creation
+      const zipTimeout = setTimeout(() => {
+        console.error('⏰ Zip creation timeout (5 minutes)');
+        throw new Error('Zip creation timeout (5 minutes)');
+      }, 5 * 60 * 1000); // 5 minute timeout
+      
+      try {
+        await createZipFile(filePaths, zipPath);
+        clearTimeout(zipTimeout);
+        console.log(`✅ Zip created successfully: ${zipFilename}`);
+      } catch (zipError) {
+        clearTimeout(zipTimeout);
+        throw zipError;
+      }
       
       // Clean up individual MP3 files after adding to zip
+      console.log(`🗑️ Cleaning up individual files...`);
       for (const audioFile of audioFiles) {
         try {
-          fs.unlinkSync(audioFile.filePath);
-          console.log(`🗑️ Cleaned up individual file: ${path.basename(audioFile.filePath)}`);
+          if (fs.existsSync(audioFile.filePath)) {
+            fs.unlinkSync(audioFile.filePath);
+            console.log(`🗑️ Cleaned up individual file: ${path.basename(audioFile.filePath)}`);
+          }
         } catch (error) {
           console.error(`⚠️ Failed to delete ${audioFile.filePath}:`, error.message);
         }
@@ -137,10 +173,14 @@ ipcMain.handle('process-youtube-links', async (event, { links, downloadPath, def
         errors 
       };
     } catch (error) {
+      console.error(`❌ Zip creation failed:`, error.message);
       errors.push({ error: `Failed to create zip: ${error.message}` });
     }
+  } else if (results.length === 1) {
+    console.log(`📁 Single file - keeping MP3 file directly: ${results[0].filename}`);
   }
 
+  console.log(`🏁 Processing complete. Results: ${results.length}, Errors: ${errors.length}`);
   return { results, errors };
 });
 
@@ -156,16 +196,37 @@ async function processYouTubeLink(linkData, downloadPath, order, defaultDuration
   console.log(`⏰ Parsed start time: "${startTime}" -> ${startSeconds} seconds`);
   console.log(`⏱️ Clip duration: ${clipDuration} seconds`);
   
-  // Convert youtu.be links to youtube.com format
-  const processedUrl = convertYouTubeUrl(url);
+  // Convert youtu.be links to youtube.com format and clean problematic parameters
+  const convertedUrl = convertYouTubeUrl(url);
+  const processedUrl = cleanYouTubeUrl(convertedUrl);
   
-  // Get video info first
-  const videoInfo = await getVideoInfo(processedUrl);
+  // Get video info first with fallback
+  logProcessStatus('Getting video info', order, '?');
+  let videoInfo;
+  try {
+    videoInfo = await getVideoInfo(processedUrl);
+  } catch (error) {
+    console.warn(`⚠️ Failed to get video info: ${error.message}`);
+    console.log(`🔄 Using fallback title generation`);
+    // Fallback to a generic title if video info fails
+    videoInfo = {
+      title: `Audio_Clip_${order}`,
+      duration: 0,
+      uploader: 'Unknown'
+    };
+  }
+  
+  // If video info failed, we can still proceed with download
+  if (videoInfo.title === `Audio_Clip_${order}`) {
+    console.log(`⚠️ Proceeding without video metadata - using generic filename`);
+  }
+  
   const safeTitle = videoInfo.title.replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '_');
   const filename = `${order.toString().padStart(2, '0')}_${safeTitle}.mp3`;
   const outputPath = path.join(downloadPath, filename);
   
   // Download and process audio
+  logProcessStatus('Downloading audio', order, '?');
   await downloadAndProcessAudio(processedUrl, outputPath, startSeconds, clipDuration);
   
   return {
@@ -210,28 +271,100 @@ function convertYouTubeUrl(url) {
   return url;
 }
 
+function cleanYouTubeUrl(url) {
+  try {
+    const urlObj = new URL(url);
+    
+    // Remove problematic query parameters that cause yt-dlp to hang
+    const problematicParams = [
+      'list',           // Playlist parameter
+      'start_radio',    // Radio feature parameter
+      'index',          // Playlist index
+      'feature',        // YouTube features
+      'ab_channel',     // Channel attribution
+      'si'              // Session info
+    ];
+    
+    // Remove problematic parameters
+    problematicParams.forEach(param => {
+      urlObj.searchParams.delete(param);
+    });
+    
+    // Keep only essential parameters
+    const essentialParams = ['v', 't', 'time'];
+    const cleanedParams = new URLSearchParams();
+    
+    essentialParams.forEach(param => {
+      if (urlObj.searchParams.has(param)) {
+        cleanedParams.set(param, urlObj.searchParams.get(param));
+      }
+    });
+    
+    // Rebuild URL with only essential parameters
+    const cleanedUrl = `${urlObj.origin}${urlObj.pathname}?${cleanedParams.toString()}`;
+    
+    console.log(`🧹 Cleaned URL: ${url} -> ${cleanedUrl}`);
+    return cleanedUrl;
+    
+  } catch (error) {
+    console.warn(`⚠️ Failed to clean URL: ${error.message}`);
+    return url; // Return original URL if cleaning fails
+  }
+}
+
 async function getVideoInfo(url) {
   return new Promise((resolve, reject) => {
-    const ytdlp = spawn('yt-dlp', ['--dump-json', url]);
+    console.log(`🔍 Getting video info for: ${url}`);
+    const ytdlp = spawn('yt-dlp', [
+      '--dump-json',
+      '--no-warnings',
+      '--no-check-certificate',
+      '--socket-timeout', '30',
+      '--retries', '1',
+      '--quiet',
+      url
+    ]);
     let output = '';
+    
+    // Add timeout for video info retrieval
+    const infoTimeout = setTimeout(() => {
+      console.error('⏰ Video info timeout - killing process');
+      ytdlp.kill('SIGKILL');
+      reject(new Error('Video info retrieval timeout (30 seconds)'));
+    }, 30 * 1000); // 30 second timeout - much more aggressive
     
     ytdlp.stdout.on('data', (data) => {
       output += data.toString();
     });
     
+    ytdlp.stderr.on('data', (data) => {
+      console.log(`yt-dlp info stderr: ${data}`);
+    });
+    
+    ytdlp.on('error', (error) => {
+      clearTimeout(infoTimeout);
+      console.error('❌ yt-dlp info error:', error.message);
+      reject(new Error('yt-dlp info retrieval failed'));
+    });
+    
     ytdlp.on('close', (code) => {
+      clearTimeout(infoTimeout);
+      console.log(`yt-dlp info exit code: ${code}`);
       if (code === 0) {
         try {
           const info = JSON.parse(output);
+          console.log(`✅ Video info retrieved: ${info.title}`);
           resolve({
             title: info.title,
             duration: info.duration,
             uploader: info.uploader
           });
         } catch (error) {
+          console.error('❌ Failed to parse video info JSON:', error.message);
           reject(new Error('Failed to parse video info'));
         }
       } else {
+        console.error(`❌ yt-dlp info failed with code: ${code}`);
         reject(new Error('Failed to get video info'));
       }
     });
@@ -252,59 +385,72 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
       '--extract-audio',
       '--audio-format', 'mp3',
       '--output', tempPath,
-      '--verbose', // Add verbose logging
+      '--no-warnings',
+      '--no-check-certificate',
+      '--socket-timeout', '30',
+      '--retries', '1',
+      '--quiet',
       url
     ]);
     
+    // Add timeout for yt-dlp process
+    const ytdlpTimeout = setTimeout(() => {
+      console.error('⏰ yt-dlp timeout - killing process');
+      ytdlpDownload.kill('SIGKILL');
+      reject(new Error('yt-dlp download timeout (2 minutes)'));
+    }, 2 * 60 * 1000); // 2 minute timeout for audio-only extraction
+    
     // Handle spawn errors
     ytdlpDownload.on('error', (error) => {
+      clearTimeout(ytdlpTimeout);
       console.error('❌ yt-dlp not found:', error.message);
       reject(new Error('yt-dlp is not installed. Please install yt-dlp to use this feature. Visit: https://github.com/yt-dlp/yt-dlp'));
     });
     
     // Log yt-dlp output for debugging
-      ytdlpDownload.stdout.on('data', (data) => {
-        console.log(`yt-dlp stdout: ${data}`);
-      });
-      
-      ytdlpDownload.stderr.on('data', (data) => {
-        console.log(`yt-dlp stderr: ${data}`);
-      });
-      
-      ytdlpDownload.on('close', (code) => {
-        console.log(`yt-dlp exit code: ${code}`);
-        if (code === 0) {
-          // Check if temp file exists and has content
-          fs.stat(tempPath, (err, stats) => {
-            if (err) {
-              console.error(`❌ Temp file not found: ${err.message}`);
-              reject(new Error('Temp file not created'));
-              return;
-            }
-            console.log(`✅ Temp file size: ${stats.size} bytes`);
-            
-            if (stats.size === 0) {
-              console.error(`❌ Temp file is empty`);
-              reject(new Error('Downloaded file is empty'));
-              return;
-            }
-            
-            // Process with ffmpeg to trim and add fade-out
-            processAudioWithFfmpeg(tempPath, outputPath, startTime, duration)
-              .then(() => {
-                // Clean up temp file
-                fs.unlink(tempPath, () => {});
-                console.log(`✅ Audio processing completed: ${outputPath}`);
-                resolve();
-              })
-              .catch(reject);
-          });
-        } else {
-          console.error(`❌ yt-dlp failed with code: ${code}`);
-          reject(new Error(`Failed to download audio (exit code: ${code})`));
-        }
-      });
+    ytdlpDownload.stdout.on('data', (data) => {
+      console.log(`yt-dlp stdout: ${data}`);
     });
+    
+    ytdlpDownload.stderr.on('data', (data) => {
+      console.log(`yt-dlp stderr: ${data}`);
+    });
+    
+    ytdlpDownload.on('close', (code) => {
+      clearTimeout(ytdlpTimeout);
+      console.log(`yt-dlp exit code: ${code}`);
+      if (code === 0) {
+        // Check if temp file exists and has content
+        fs.stat(tempPath, (err, stats) => {
+          if (err) {
+            console.error(`❌ Temp file not found: ${err.message}`);
+            reject(new Error('Temp file not created'));
+            return;
+          }
+          console.log(`✅ Temp file size: ${stats.size} bytes`);
+          
+          if (stats.size === 0) {
+            console.error(`❌ Temp file is empty`);
+            reject(new Error('Downloaded file is empty'));
+            return;
+          }
+          
+          // Process with ffmpeg to trim and add fade-out
+          processAudioWithFfmpeg(tempPath, outputPath, startTime, duration)
+            .then(() => {
+              // Clean up temp file
+              fs.unlink(tempPath, () => {});
+              console.log(`✅ Audio processing completed: ${outputPath}`);
+              resolve();
+            })
+            .catch(reject);
+        });
+      } else {
+        console.error(`❌ yt-dlp failed with code: ${code}`);
+        reject(new Error(`Failed to download audio (exit code: ${code})`));
+      }
+    });
+  });
 }
 
 async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration) {
@@ -314,43 +460,8 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
     console.log(`📤 Output: ${outputPath}`);
     console.log(`⏰ Start: ${startTime}s, Duration: ${duration}s`);
     
-    // First, let's check what's at the start time in the original file
-    console.log(`🔍 Checking audio content at start time ${startTime}s...`);
-    const probeArgs = [
-      '-i', inputPath,
-      '-ss', startTime.toString(),
-      '-t', '5', // Check 5 seconds from start time
-      '-af', 'astats=metadata=1:reset=1',
-      '-f', 'null',
-      '-'
-    ];
-    
-    const probe = spawn('ffmpeg', probeArgs);
-    probe.stderr.on('data', (data) => {
-      const output = data.toString();
-      if (output.includes('lavfi.astats')) {
-        console.log(`📊 Audio stats at ${startTime}s:`, output);
-      }
-    });
-    
-    // Add timeout to prevent hanging
-    const probeTimeout = setTimeout(() => {
-      console.log(`⚠️ Probe timeout, continuing with processing...`);
-      probe.kill();
-      processAudioSegment();
-    }, 5000); // 5 second timeout
-    
-    probe.on('close', (code) => {
-      clearTimeout(probeTimeout);
-      console.log(`🔍 Probe completed with code: ${code}`);
-      processAudioSegment();
-    });
-    
-    probe.on('error', (error) => {
-      clearTimeout(probeTimeout);
-      console.log(`⚠️ Probe error: ${error.message}, continuing with processing...`);
-      processAudioSegment();
-    });
+    // Skip the probe step to avoid hanging - go directly to processing
+    processAudioSegment();
     
     function processAudioSegment() {
       // Now do the actual processing
@@ -371,11 +482,19 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
       
       const extract = spawn('ffmpeg', extractArgs);
       
+      // Add timeout for extract process
+      const extractTimeout = setTimeout(() => {
+        console.error('⏰ Extract timeout - killing process');
+        extract.kill('SIGKILL');
+        reject(new Error('ffmpeg extract timeout (2 minutes)'));
+      }, 2 * 60 * 1000); // 2 minute timeout
+      
       extract.stderr.on('data', (data) => {
         console.log(`extract stderr: ${data}`);
       });
       
       extract.on('close', (extractCode) => {
+        clearTimeout(extractTimeout);
         if (extractCode === 0) {
           console.log(`✅ Segment extracted successfully`);
           
@@ -394,11 +513,25 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
           
           const fade = spawn('ffmpeg', fadeArgs);
           
+          // Add timeout for fade process
+          const fadeTimeout = setTimeout(() => {
+            console.error('⏰ Fade timeout - killing process');
+            fade.kill('SIGKILL');
+            // Clean up temp segment
+            try {
+              fs.unlinkSync(tempSegmentPath);
+            } catch (error) {
+              console.log(`⚠️ Could not delete temp segment: ${error.message}`);
+            }
+            reject(new Error('ffmpeg fade timeout (2 minutes)'));
+          }, 2 * 60 * 1000); // 2 minute timeout
+          
           fade.stderr.on('data', (data) => {
             console.log(`fade stderr: ${data}`);
           });
           
           fade.on('close', (fadeCode) => {
+            clearTimeout(fadeTimeout);
             // Clean up temp segment immediately
             try {
               fs.unlinkSync(tempSegmentPath);
@@ -446,19 +579,55 @@ async function createZipFile(filePaths, zipPath) {
     const output = fs.createWriteStream(zipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
     
-    output.on('close', () => resolve());
-    archive.on('error', (err) => reject(err));
+    let addedFiles = 0;
+    const totalFiles = filePaths.length;
+    
+    output.on('close', () => {
+      console.log(`✅ Zip file created: ${archive.pointer()} bytes`);
+      resolve();
+    });
+    
+    archive.on('error', (err) => {
+      console.error(`❌ Archive error:`, err);
+      reject(err);
+    });
+    
+    archive.on('entry', (entry) => {
+      addedFiles++;
+      console.log(`📁 Added to zip: ${entry.name} (${addedFiles}/${totalFiles})`);
+    });
     
     archive.pipe(output);
     
+    // Add files to archive
     filePaths.forEach(filePath => {
       if (fs.existsSync(filePath)) {
         archive.file(filePath, { name: path.basename(filePath) });
+      } else {
+        console.warn(`⚠️ File not found: ${filePath}`);
       }
     });
     
     archive.finalize();
   });
+}
+
+// Process cleanup utility
+function cleanupProcesses() {
+  // Force garbage collection if available
+  if (global.gc) {
+    global.gc();
+  }
+  
+  // Log memory usage
+  const memUsage = process.memoryUsage();
+  console.log(`🧠 Memory usage: RSS=${Math.round(memUsage.rss / 1024 / 1024)}MB, Heap=${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`);
+}
+
+// Process monitoring utility
+function logProcessStatus(step, fileNumber, totalFiles) {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] 📊 Process Status: ${step} (File ${fileNumber}/${totalFiles})`);
 }
 
 // Store user preferences
