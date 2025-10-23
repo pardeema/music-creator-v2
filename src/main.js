@@ -10,6 +10,11 @@ const getBinaryPath = (binaryName) => {
   const bundledPath = path.join(process.resourcesPath, 'binaries', binaryName);
   const systemPath = binaryName; // Use system PATH
   
+  console.log(`🔍 Checking for ${binaryName}:`);
+  console.log(`  - Bundled path: ${bundledPath}`);
+  console.log(`  - Resources path: ${process.resourcesPath}`);
+  console.log(`  - Bundled exists: ${fs.existsSync(bundledPath)}`);
+  
   // Check if bundled binary exists
   if (fs.existsSync(bundledPath)) {
     console.log(`📦 Using bundled ${binaryName}: ${bundledPath}`);
@@ -496,6 +501,9 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
       reject(new Error('yt-dlp is not available. Please ensure the application is properly installed and try again. If the issue persists, please reinstall Music Creator.'));
     });
     
+    // Collect stderr for error reporting
+    let stderr = '';
+    
     // Log yt-dlp output for debugging
     ytdlpDownload.stdout.on('data', (data) => {
       console.log(`yt-dlp stdout: ${data}`);
@@ -503,6 +511,7 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
     
     ytdlpDownload.stderr.on('data', (data) => {
       console.log(`yt-dlp stderr: ${data}`);
+      stderr += data.toString();
     });
     
     ytdlpDownload.on('close', (code) => {
@@ -538,7 +547,9 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
       } else {
         console.error(`❌ yt-dlp failed with code: ${code}`);
         logError(`yt-dlp failed with code: ${code}`);
-        reject(new Error(`Failed to download audio (exit code: ${code})`));
+        console.error(`❌ yt-dlp stderr: ${stderr}`);
+        logError(`yt-dlp stderr: ${stderr}`);
+        reject(new Error(`Failed to download audio (exit code: ${code}): ${stderr}`));
       }
     });
   });
