@@ -319,7 +319,26 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
       }
     });
     
-    probe.on('close', () => {
+    // Add timeout to prevent hanging
+    const probeTimeout = setTimeout(() => {
+      console.log(`⚠️ Probe timeout, continuing with processing...`);
+      probe.kill();
+      processAudioSegment();
+    }, 5000); // 5 second timeout
+    
+    probe.on('close', (code) => {
+      clearTimeout(probeTimeout);
+      console.log(`🔍 Probe completed with code: ${code}`);
+      processAudioSegment();
+    });
+    
+    probe.on('error', (error) => {
+      clearTimeout(probeTimeout);
+      console.log(`⚠️ Probe error: ${error.message}, continuing with processing...`);
+      processAudioSegment();
+    });
+    
+    function processAudioSegment() {
       // Now do the actual processing
       // Use a more robust approach: first extract the segment, then apply fade
       const tempSegmentPath = outputPath.replace('.mp3', '_segment_temp.mp3');
@@ -399,7 +418,7 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
           reject(new Error(`Failed to extract segment (exit code: ${extractCode})`));
         }
       });
-    });
+    }
   });
 }
 
