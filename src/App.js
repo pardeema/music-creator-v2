@@ -9,10 +9,21 @@ function App() {
   const [results, setResults] = useState([]);
   const [errors, setErrors] = useState([]);
   const [preferences, setPreferences] = useState({});
+  const [dependencies, setDependencies] = useState({ missing: [], hasAll: true });
 
   useEffect(() => {
     loadUserPreferences();
+    checkDependencies();
   }, []);
+
+  const checkDependencies = async () => {
+    try {
+      const deps = await window.electronAPI.checkDependencies();
+      setDependencies(deps);
+    } catch (error) {
+      console.error('Failed to check dependencies:', error);
+    }
+  };
 
   const loadUserPreferences = async () => {
     try {
@@ -188,7 +199,26 @@ function App() {
           </div>
         </div>
       </header>
-
+      
+      {!dependencies.hasAll && (
+        <div className="dependency-warning">
+          <div className="warning-content">
+            <h3>⚠️ Missing Dependencies</h3>
+            <p>The following required tools are not installed:</p>
+            <ul>
+              {dependencies.missing.map(dep => (
+                <li key={dep}>
+                  <strong>{dep}</strong> - 
+                  {dep === 'yt-dlp' && ' Download from: https://github.com/yt-dlp/yt-dlp'}
+                  {dep === 'ffmpeg' && ' Download from: https://ffmpeg.org/download.html'}
+                </li>
+              ))}
+            </ul>
+            <p>Please install these tools to use the audio processing features.</p>
+          </div>
+        </div>
+      )}
+      
       <main className="App-main">
         {/* Download Path Selection */}
         <section className="section">
@@ -263,7 +293,7 @@ function App() {
         <section className="section">
           <button
             onClick={processLinks}
-            disabled={isProcessing || links.length === 0 || !downloadPath}
+            disabled={isProcessing || links.length === 0 || !downloadPath || !dependencies.hasAll}
             className="process-button"
           >
             {isProcessing ? 'Processing...' : 'Process Links'}

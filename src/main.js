@@ -46,7 +46,32 @@ app.on('activate', () => {
   }
 });
 
+// Check for required dependencies
+function checkDependencies() {
+  const dependencies = ['yt-dlp', 'ffmpeg'];
+  const missing = [];
+  
+  for (const dep of dependencies) {
+    try {
+      const { spawn } = require('child_process');
+      const process = spawn(dep, ['--version'], { stdio: 'pipe' });
+      process.on('error', () => {
+        missing.push(dep);
+      });
+    } catch (error) {
+      missing.push(dep);
+    }
+  }
+  
+  return missing;
+}
+
 // IPC handlers for YouTube processing
+ipcMain.handle('check-dependencies', async () => {
+  const missing = checkDependencies();
+  return { missing, hasAll: missing.length === 0 };
+});
+
 ipcMain.handle('select-download-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
@@ -218,59 +243,74 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
     console.log(`📁 Output path: ${outputPath}`);
     console.log(`⏰ Start time: ${startTime}s, Duration: ${duration}s`);
     
-    // Download audio with yt-dlp
-    const tempPath = outputPath.replace('.mp3', '_temp.mp3');
-    console.log(`📥 Temp file: ${tempPath}`);
-    
-    const ytdlp = spawn('yt-dlp', [
-      '--extract-audio',
-      '--audio-format', 'mp3',
-      '--output', tempPath,
-      '--verbose', // Add verbose logging
-      url
-    ]);
-    
-    // Log yt-dlp output for debugging
-    ytdlp.stdout.on('data', (data) => {
-      console.log(`yt-dlp stdout: ${data}`);
-    });
-    
-    ytdlp.stderr.on('data', (data) => {
-      console.log(`yt-dlp stderr: ${data}`);
+    // Check if yt-dlp is available
+    const ytdlp = spawn('yt-dlp', ['--version'], { stdio: 'pipe' });
+    ytdlp.on('error', (error) => {
+      console.error('❌ yt-dlp not found:', error.message);
+      reject(new Error('yt-dlp is not installed. Please install yt-dlp to use this feature. Visit: https://github.com/yt-dlp/yt-dlp'));
+      return;
     });
     
     ytdlp.on('close', (code) => {
-      console.log(`yt-dlp exit code: ${code}`);
-      if (code === 0) {
-        // Check if temp file exists and has content
-        fs.stat(tempPath, (err, stats) => {
-          if (err) {
-            console.error(`❌ Temp file not found: ${err.message}`);
-            reject(new Error('Temp file not created'));
-            return;
-          }
-          console.log(`✅ Temp file size: ${stats.size} bytes`);
-          
-          if (stats.size === 0) {
-            console.error(`❌ Temp file is empty`);
-            reject(new Error('Downloaded file is empty'));
-            return;
-          }
-          
-          // Process with ffmpeg to trim and add fade-out
-          processAudioWithFfmpeg(tempPath, outputPath, startTime, duration)
-            .then(() => {
-              // Clean up temp file
-              fs.unlink(tempPath, () => {});
-              console.log(`✅ Audio processing completed: ${outputPath}`);
-              resolve();
-            })
-            .catch(reject);
-        });
-      } else {
-        console.error(`❌ yt-dlp failed with code: ${code}`);
-        reject(new Error(`Failed to download audio (exit code: ${code})`));
+      if (code !== 0) {
+        reject(new Error('yt-dlp is not installed. Please install yt-dlp to use this feature. Visit: https://github.com/yt-dlp/yt-dlp'));
+        return;
       }
+      
+      // Download audio with yt-dlp
+      const tempPath = outputPath.replace('.mp3', '_temp.mp3');
+      console.log(`📥 Temp file: ${tempPath}`);
+      
+      const ytdlpDownload = spawn('yt-dlp', [
+        '--extract-audio',
+        '--audio-format', 'mp3',
+        '--output', tempPath,
+        '--verbose', // Add verbose logging
+        url
+      ]);
+    
+      // Log yt-dlp output for debugging
+      ytdlpDownload.stdout.on('data', (data) => {
+        console.log(`yt-dlp stdout: ${data}`);
+      });
+      
+      ytdlpDownload.stderr.on('data', (data) => {
+        console.log(`yt-dlp stderr: ${data}`);
+      });
+      
+      ytdlpDownload.on('close', (code) => {
+        console.log(`yt-dlp exit code: ${code}`);
+        if (code === 0) {
+          // Check if temp file exists and has content
+          fs.stat(tempPath, (err, stats) => {
+            if (err) {
+              console.error(`❌ Temp file not found: ${err.message}`);
+              reject(new Error('Temp file not created'));
+              return;
+            }
+            console.log(`✅ Temp file size: ${stats.size} bytes`);
+            
+            if (stats.size === 0) {
+              console.error(`❌ Temp file is empty`);
+              reject(new Error('Downloaded file is empty'));
+              return;
+            }
+            
+            // Process with ffmpeg to trim and add fade-out
+            processAudioWithFfmpeg(tempPath, outputPath, startTime, duration)
+              .then(() => {
+                // Clean up temp file
+                fs.unlink(tempPath, () => {});
+                console.log(`✅ Audio processing completed: ${outputPath}`);
+                resolve();
+              })
+              .catch(reject);
+          });
+        } else {
+          console.error(`❌ yt-dlp failed with code: ${code}`);
+          reject(new Error(`Failed to download audio (exit code: ${code})`));
+        }
+      });
     });
   });
 }

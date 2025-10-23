@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electronAPI', {
   selectDownloadFolder: () => ipcRenderer.invoke('select-download-folder'),
   processYouTubeLinks: (data) => ipcRenderer.invoke('process-youtube-links', data),
+  checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
   savePreferences: (preferences) => ipcRenderer.invoke('save-preferences', preferences),
   loadPreferences: () => ipcRenderer.invoke('load-preferences'),
   
