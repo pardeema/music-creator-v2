@@ -70,6 +70,8 @@ ipcMain.handle('process-youtube-links', async (event, { links, downloadPath, def
   const results = [];
   const errors = [];
   
+  console.log(`🚀 Starting processing of ${links.length} files`);
+  
   for (let i = 0; i < links.length; i++) {
     const link = links[i];
     try {
@@ -81,9 +83,21 @@ ipcMain.handle('process-youtube-links', async (event, { links, downloadPath, def
         link: link.url
       });
 
+      console.log(`🎵 Processing file ${i + 1}/${links.length}: ${link.url}`);
       const result = await processYouTubeLink(link, downloadPath, i + 1, defaultDuration);
       results.push(result);
+      
+      // Force garbage collection and cleanup between files
+      if (global.gc) {
+        global.gc();
+      }
+      
+      // Small delay to prevent resource exhaustion
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      console.log(`✅ Completed file ${i + 1}/${links.length}`);
     } catch (error) {
+      console.error(`❌ Error processing file ${i + 1}:`, error.message);
       errors.push({
         link: link.url,
         error: error.message
@@ -385,8 +399,13 @@ async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration
           });
           
           fade.on('close', (fadeCode) => {
-            // Clean up temp segment
-            fs.unlink(tempSegmentPath, () => {});
+            // Clean up temp segment immediately
+            try {
+              fs.unlinkSync(tempSegmentPath);
+              console.log(`🗑️ Cleaned up temp segment: ${path.basename(tempSegmentPath)}`);
+            } catch (error) {
+              console.log(`⚠️ Could not delete temp segment: ${error.message}`);
+            }
             
             if (fadeCode === 0) {
               console.log(`✅ Fade applied successfully`);
