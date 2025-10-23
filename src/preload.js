@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('download-progress', callback);
   },
   
+  onAppLog: (callback) => {
+    ipcRenderer.on('app-log', callback);
+  },
+  
   removeAllListeners: (channel) => {
     ipcRenderer.removeAllListeners(channel);
   }

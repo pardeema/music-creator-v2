@@ -10,10 +10,27 @@ function App() {
   const [errors, setErrors] = useState([]);
   const [preferences, setPreferences] = useState({});
   const [dependencies, setDependencies] = useState({ missing: [], hasAll: true });
+  const [logs, setLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
 
   useEffect(() => {
     loadUserPreferences();
     checkDependencies();
+    
+    // Set up log listener
+    const handleAppLog = (event, logData) => {
+      setLogs(prevLogs => {
+        const newLogs = [...prevLogs, logData];
+        // Keep only last 100 logs to prevent memory issues
+        return newLogs.slice(-100);
+      });
+    };
+    
+    window.electronAPI.onAppLog(handleAppLog);
+    
+    return () => {
+      window.electronAPI.removeAllListeners('app-log');
+    };
   }, []);
 
   const checkDependencies = async () => {
@@ -297,13 +314,21 @@ function App() {
 
         {/* Process Button */}
         <section className="section">
-          <button
-            onClick={processLinks}
-            disabled={isProcessing || links.length === 0 || !downloadPath || !dependencies.hasAll}
-            className="process-button"
-          >
-            {isProcessing ? 'Processing...' : 'Process Links'}
-          </button>
+          <div className="process-controls">
+            <button
+              onClick={processLinks}
+              disabled={isProcessing || links.length === 0 || !downloadPath || !dependencies.hasAll}
+              className="process-button"
+            >
+              {isProcessing ? 'Processing...' : 'Process Links'}
+            </button>
+            <button
+              onClick={() => setShowLogs(!showLogs)}
+              className="logs-toggle-button"
+            >
+              {showLogs ? 'Hide Logs' : 'Show Logs'}
+            </button>
+          </div>
         </section>
 
         {/* Progress */}
@@ -342,6 +367,35 @@ function App() {
                   )}
                 </div>
               ))}
+            </div>
+          </section>
+        )}
+
+        {/* Logs */}
+        {showLogs && (
+          <section className="section">
+            <h3>Process Logs</h3>
+            <div className="logs-container">
+              <div className="logs-header">
+                <span>Showing {logs.length} log entries</span>
+                <button 
+                  onClick={() => setLogs([])} 
+                  className="clear-logs-button"
+                >
+                  Clear Logs
+                </button>
+              </div>
+              <div className="logs-list">
+                {logs.map((log, index) => (
+                  <div key={index} className={`log-item log-${log.level}`}>
+                    <span className="log-timestamp">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+                    <span className="log-level">{log.level.toUpperCase()}</span>
+                    <span className="log-message">{log.message}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </section>
         )}

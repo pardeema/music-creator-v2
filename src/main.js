@@ -97,6 +97,51 @@ ipcMain.handle('check-dependencies', async () => {
   return { missing, hasAll: missing.length === 0 };
 });
 
+// IPC handler for log listening
+ipcMain.handle('on-app-log', (event, callback) => {
+  // This will be handled by the renderer process
+  return true;
+});
+
+// Logging system for verbose output
+function logToRenderer(level, message, data = null) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('app-log', {
+      timestamp: new Date().toISOString(),
+      level,
+      message,
+      data
+    });
+  }
+}
+
+// Enhanced logging functions
+function logInfo(message, data = null) {
+  console.log(`[INFO] ${message}`);
+  logToRenderer('info', message, data);
+}
+
+function logSuccess(message, data = null) {
+  console.log(`[SUCCESS] ${message}`);
+  logToRenderer('success', message, data);
+}
+
+function logWarning(message, data = null) {
+  console.warn(`[WARNING] ${message}`);
+  logToRenderer('warning', message, data);
+}
+
+function logError(message, data = null) {
+  console.error(`[ERROR] ${message}`);
+  logToRenderer('error', message, data);
+}
+
+function logProcess(step, fileNumber, totalFiles, details = null) {
+  const message = `${step} (File ${fileNumber}/${totalFiles})`;
+  console.log(`[PROCESS] ${message}`);
+  logToRenderer('process', message, { step, fileNumber, totalFiles, details });
+}
+
 ipcMain.handle('select-download-folder', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openDirectory']
@@ -353,6 +398,7 @@ function cleanYouTubeUrl(url) {
 async function getVideoInfo(url) {
   return new Promise((resolve, reject) => {
     console.log(`🔍 Getting video info for: ${url}`);
+    logInfo(`Getting video info for: ${url}`);
     const ytdlp = spawn(getBinaryPath('yt-dlp'), [
       '--dump-json',
       '--no-warnings',
@@ -392,6 +438,7 @@ async function getVideoInfo(url) {
         try {
           const info = JSON.parse(output);
           console.log(`✅ Video info retrieved: ${info.title}`);
+          logSuccess(`Video info retrieved: ${info.title}`);
           resolve({
             title: info.title,
             duration: info.duration,
@@ -412,12 +459,16 @@ async function getVideoInfo(url) {
 async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
   return new Promise((resolve, reject) => {
     console.log(`🎵 Starting audio download for: ${url}`);
+    logInfo(`Starting audio download for: ${url}`);
     console.log(`📁 Output path: ${outputPath}`);
+    logInfo(`Output path: ${outputPath}`);
     console.log(`⏰ Start time: ${startTime}s, Duration: ${duration}s`);
+    logInfo(`Start time: ${startTime}s, Duration: ${duration}s`);
     
     // Download audio with yt-dlp
     const tempPath = outputPath.replace('.mp3', '_temp.mp3');
     console.log(`📥 Temp file: ${tempPath}`);
+    logInfo(`Temp file: ${tempPath}`);
     
     const ytdlpDownload = spawn(getBinaryPath('yt-dlp'), [
       '--extract-audio',
@@ -479,12 +530,14 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
               // Clean up temp file
               fs.unlink(tempPath, () => {});
               console.log(`✅ Audio processing completed: ${outputPath}`);
+              logSuccess(`Audio processing completed: ${outputPath}`);
               resolve();
             })
             .catch(reject);
         });
       } else {
         console.error(`❌ yt-dlp failed with code: ${code}`);
+        logError(`yt-dlp failed with code: ${code}`);
         reject(new Error(`Failed to download audio (exit code: ${code})`));
       }
     });
@@ -494,9 +547,13 @@ async function downloadAndProcessAudio(url, outputPath, startTime, duration) {
 async function processAudioWithFfmpeg(inputPath, outputPath, startTime, duration) {
   return new Promise((resolve, reject) => {
     console.log(`🎬 Starting ffmpeg processing:`);
+    logInfo(`Starting ffmpeg processing`);
     console.log(`📥 Input: ${inputPath}`);
+    logInfo(`Input: ${inputPath}`);
     console.log(`📤 Output: ${outputPath}`);
+    logInfo(`Output: ${outputPath}`);
     console.log(`⏰ Start: ${startTime}s, Duration: ${duration}s`);
+    logInfo(`Start: ${startTime}s, Duration: ${duration}s`);
     
     // Skip the probe step to avoid hanging - go directly to processing
     processAudioSegment();
@@ -666,6 +723,7 @@ function cleanupProcesses() {
 function logProcessStatus(step, fileNumber, totalFiles) {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] 📊 Process Status: ${step} (File ${fileNumber}/${totalFiles})`);
+  logProcess(step, fileNumber, totalFiles);
 }
 
 // Store user preferences
