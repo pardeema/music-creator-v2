@@ -4,7 +4,6 @@ import './App.css';
 function App() {
   const [links, setLinks] = useState([]);
   const [downloadPath, setDownloadPath] = useState('');
-  const [defaultDuration, setDefaultDuration] = useState(15);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0, status: '' });
   const [results, setResults] = useState([]);
@@ -19,7 +18,6 @@ function App() {
     try {
       const prefs = await window.electronAPI.loadPreferences();
       setPreferences(prefs);
-      setDefaultDuration(prefs.defaultDuration || 15);
       setDownloadPath(prefs.downloadPath || '');
     } catch (error) {
       console.error('Failed to load preferences:', error);
@@ -36,13 +34,74 @@ function App() {
   };
 
   const addLink = () => {
-    setLinks([...links, { url: '', startTime: '', duration: defaultDuration }]);
+    setLinks([...links, { url: '', startTime: '', duration: 15 }]);
   };
 
   const updateLink = (index, field, value) => {
     const updatedLinks = [...links];
     updatedLinks[index][field] = value;
+    
+    // If updating URL, parse timestamp and convert youtu.be URLs
+    if (field === 'url') {
+      const parsedData = parseYouTubeUrl(value);
+      if (parsedData.startTime) {
+        updatedLinks[index].startTime = parsedData.startTime;
+      }
+      if (parsedData.convertedUrl) {
+        updatedLinks[index].url = parsedData.convertedUrl;
+      }
+    }
+    
     setLinks(updatedLinks);
+  };
+
+  const parseYouTubeUrl = (url) => {
+    if (!url) return { startTime: null, convertedUrl: null };
+    
+    let convertedUrl = url;
+    let startTime = null;
+    
+    // Convert youtu.be to youtube.com
+    if (url.includes('youtu.be/')) {
+      const match = url.match(/youtu\.be\/([^?&]+)(\?.*)?/);
+      if (match) {
+        const videoId = match[1];
+        const params = match[2] || '';
+        convertedUrl = `https://www.youtube.com/watch?v=${videoId}${params}`;
+      }
+    }
+    
+    // Parse timestamp from URL parameters
+    const urlObj = new URL(convertedUrl);
+    const tParam = urlObj.searchParams.get('t');
+    const timeParam = urlObj.searchParams.get('time');
+    
+    if (tParam) {
+      startTime = parseTimestamp(tParam);
+    } else if (timeParam) {
+      startTime = parseTimestamp(timeParam);
+    }
+    
+    return { startTime, convertedUrl: convertedUrl !== url ? convertedUrl : null };
+  };
+
+  const parseTimestamp = (timestamp) => {
+    if (!timestamp) return null;
+    
+    // Handle different timestamp formats
+    if (timestamp.includes(':')) {
+      return timestamp; // Already in MM:SS or H:MM:SS format
+    }
+    
+    // Convert seconds to MM:SS if it's a number
+    const seconds = parseInt(timestamp);
+    if (!isNaN(seconds)) {
+      const minutes = Math.floor(seconds / 60);
+      const remainingSeconds = seconds % 60;
+      return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+    }
+    
+    return timestamp;
   };
 
   const removeLink = (index) => {
@@ -86,7 +145,7 @@ function App() {
       const response = await window.electronAPI.processYouTubeLinks({
         links,
         downloadPath,
-        defaultDuration
+        defaultDuration: 15
       });
 
       setResults(response.results);
@@ -143,21 +202,6 @@ function App() {
           </div>
         </section>
 
-        {/* Default Duration */}
-        <section className="section">
-          <h2>Default Clip Duration</h2>
-          <div className="duration-selector">
-            <input
-              type="range"
-              min="12"
-              max="25"
-              value={defaultDuration}
-              onChange={(e) => setDefaultDuration(parseInt(e.target.value))}
-              className="duration-slider"
-            />
-            <span className="duration-value">{defaultDuration} seconds</span>
-          </div>
-        </section>
 
         {/* YouTube Links */}
         <section className="section">
@@ -179,24 +223,23 @@ function App() {
               <div className="link-inputs">
                 <input
                   type="url"
-                  placeholder="YouTube URL (with or without timestamp)"
+                  placeholder="YouTube URL (timestamps auto-detected)"
                   value={link.url}
                   onChange={(e) => updateLink(index, 'url', e.target.value)}
                   className="url-input"
                 />
                 <input
                   type="text"
-                  placeholder="Start time (seconds, MM:SS, or H:MM:SS)"
+                  placeholder="Start time (auto-filled from URL)"
                   value={link.startTime}
                   onChange={(e) => updateLink(index, 'startTime', e.target.value)}
                   className="time-input"
                 />
                 <input
                   type="number"
-                  min="12"
-                  max="25"
+                  min="1"
                   value={link.duration}
-                  onChange={(e) => updateLink(index, 'duration', parseInt(e.target.value))}
+                  onChange={(e) => updateLink(index, 'duration', parseInt(e.target.value) || 15)}
                   className="duration-input"
                 />
                 <span className="duration-label">sec</span>

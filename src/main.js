@@ -79,12 +79,37 @@ ipcMain.handle('process-youtube-links', async (event, { links, downloadPath, def
     }
   }
 
-  // Create zip file if multiple results
-  if (results.length > 1) {
+  // Always create zip file and clean up individual files
+  if (results.length > 0) {
     try {
-      const zipPath = path.join(downloadPath, 'music_clips.zip');
-      await createZipFile(results.map(r => r.filePath), zipPath);
-      results.push({ type: 'zip', filePath: zipPath, filename: 'music_clips.zip' });
+      // Generate timestamped zip filename
+      const now = new Date();
+      const timestamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+      const zipFilename = `music_clips_${timestamp}.zip`;
+      const zipPath = path.join(downloadPath, zipFilename);
+      
+      // Get all audio file paths for the zip
+      const audioFiles = results.filter(r => r.type === 'audio');
+      const filePaths = audioFiles.map(r => r.filePath);
+      
+      console.log(`📦 Creating zip file: ${zipFilename}`);
+      await createZipFile(filePaths, zipPath);
+      
+      // Clean up individual MP3 files after adding to zip
+      for (const audioFile of audioFiles) {
+        try {
+          fs.unlinkSync(audioFile.filePath);
+          console.log(`🗑️ Cleaned up individual file: ${path.basename(audioFile.filePath)}`);
+        } catch (error) {
+          console.error(`⚠️ Failed to delete ${audioFile.filePath}:`, error.message);
+        }
+      }
+      
+      // Return only the zip file in results
+      return { 
+        results: [{ type: 'zip', filePath: zipPath, filename: zipFilename }], 
+        errors 
+      };
     } catch (error) {
       errors.push({ error: `Failed to create zip: ${error.message}` });
     }
